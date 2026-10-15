@@ -98,6 +98,7 @@ import com.google.common.io.Files
 import java.nio.file.Path
 import java.util.function.Function
 import java.util.stream.Collectors
+import net.elytrium.limboapi.build.GeneratorProcess
 
 enum MinecraftVersion {
   MINECRAFT_1_7_2,
@@ -207,10 +208,12 @@ sourceSets {
 }
 
 tasks.register("downloadManifest") {
-  this.println("> Downloading version manifest...")
-  versionManifestFile.getParentFile().mkdirs()
-  if (checkIsCacheValid(versionManifestFile)) {
-    FileUtils.copyURLToFile(new URL(manifestUrl), versionManifestFile)
+  doLast {
+    this.println("> Downloading version manifest...")
+    versionManifestFile.getParentFile().mkdirs()
+    if (checkIsCacheValid(versionManifestFile)) {
+      FileUtils.copyURLToFile(new URL(manifestUrl), versionManifestFile)
+    }
   }
 }
 
@@ -287,22 +290,18 @@ File generateData(MinecraftVersion version) {
     // Ignored.
   }
 
-  String command
+  File java = new File(System.getProperty("java.home"), System.getProperty("os.name").toLowerCase().contains("win") ? "bin/java.exe" : "bin/java")
+  List<String> commandLine
   if (version >= MinecraftVersion.MINECRAFT_1_18) {
-    command = "\"%s\" -DbundlerMainClass=net.minecraft.data.Main -jar \"${jarFile.getAbsolutePath()}\" --reports --server"
+    commandLine = [java.getAbsolutePath(), "-Xmx1g", "-DbundlerMainClass=net.minecraft.data.Main", "-jar", jarFile.getAbsolutePath(), "--reports", "--server"]
   } else {
-    command = "\"%s\" -cp \"${jarFile.getAbsolutePath()}\" net.minecraft.data.Main --reports --server"
+    commandLine = [java.getAbsolutePath(), "-Xmx1g", "-cp", jarFile.getAbsolutePath(), "net.minecraft.data.Main", "--reports", "--server"]
   }
-
-  List<String> commandLine;
-  if (System.getProperty("os.name").toLowerCase().contains("win")) {
-    File java = new File(System.getProperty("java.home"), "bin/java.exe")
-    commandLine = ["cmd", "/c", String.format(command, java)]
-  } else {
-    File java = new File(System.getProperty("java.home"), "bin/java")
-    commandLine = ["bash", "-c", String.format(command, java)]
+  File generatorLog = new File(parent, "generator.log")
+  GeneratorProcess.run(commandLine, parent, generatorLog, 600)
+  if (getGeneratedCache(version) == null) {
+    throw new GradleException("Minecraft ${version.getVersionName()} data reports are incomplete. See ${generatorLog}")
   }
-  commandLine.execute([], parent).waitFor()
 
   // Remove/compact files, reduces disk usage from ~2.9gb to ~92mb (or ~9.5mb on a compressed filesystem)
   jarFile.delete()
@@ -715,36 +714,32 @@ void generateTags(File targetDir, Map<MinecraftVersion, File> tagDirs) {
 
 tasks.register("generateMappings") {
   dependsOn(downloadManifest)
+  doLast {
+    File targetDir = new File(generatedDir, "mapping")
+    targetDir.mkdirs()
+    this.println("> Generating Minecraft data...")
 
-  File targetDir = new File(generatedDir, "mapping")
-  targetDir.mkdirs()
+    Map<MinecraftVersion, File> generated = Arrays.stream(MinecraftVersion.values())
+            .dropWhile({ it < MinecraftVersion.MINECRAFT_1_13 })
+            .collect(Collectors.toMap(Function.identity(), this::generateData))
 
-  this.println("> Generating Minecraft data...")
+    Map<MinecraftVersion, Object> blockReports = generated.collectEntries({ version, directory ->
+      [version, new JsonSlurper().parse(new File(directory, "reports/blocks.json"))]
+    })
+    this.generateBlockMappings(targetDir, blockReports)
 
-  Map<MinecraftVersion, File> generated = Arrays.stream(MinecraftVersion.values())
-          .dropWhile({ it < MinecraftVersion.MINECRAFT_1_13 })
-          .collect(Collectors.toMap(Function.identity(), this::generateData))
+    Map<MinecraftVersion, Object> registriesReports = generated
+            .findAll({ it.getKey() >= MinecraftVersion.MINECRAFT_1_14 })
+            .collectEntries({ version, directory ->
+              [version, new JsonSlurper().parse(new File(directory, "reports/registries.json"))]
+            })
+    this.generateRegistryMappings(targetDir, registriesReports)
 
-  Map<MinecraftVersion, Object> blockReports = generated.collectEntries({ version, directory ->
-    [version, new JsonSlurper().parse(new File(directory, "reports/blocks.json"))]
-  })
-
-  this.generateBlockMappings(targetDir, blockReports)
-
-  Map<MinecraftVersion, Object> registriesReports = generated
-          .findAll({ it.getKey() >= MinecraftVersion.MINECRAFT_1_14 })
-          .collectEntries({ version, directory ->
-            [version, new JsonSlurper().parse(new File(directory, "reports/registries.json"))]
-          })
-
-  this.generateRegistryMappings(targetDir, registriesReports)
-
-  Map<MinecraftVersion, File> tags = generated
-          .collectEntries({ version, directory ->
-            [version, new File(directory, "data/minecraft/tags")]
-          })
-
-  this.generateTags(targetDir, tags)
+    Map<MinecraftVersion, File> tags = generated.collectEntries({ version, directory ->
+      [version, new File(directory, "data/minecraft/tags")]
+    })
+    this.generateTags(targetDir, tags)
+  }
 }
 
 processResources.dependsOn(generateMappings)

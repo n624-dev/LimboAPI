@@ -2,15 +2,18 @@ name: Java CI with Gradle
 
 on:
   push:
-    branches:
-      - master
+    branches: [master, mc-26.3]
   pull_request:
-    branches:
-      - master
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
@@ -19,56 +22,30 @@ jobs:
         with:
           distribution: temurin
           java-version: 25
+          cache: gradle
       - name: Cache generated data
         uses: actions/cache@v5.0.4
         with:
           path: |
             plugin/build/minecraft/
             plugin/build/generated/minecraft/mapping/
-          key: minecraft-${{ hashFiles('gradle.properties') }}
-      - name: Build LimboAPI
-        run: ./gradlew build
-      - name: Upload LimboAPI
+          key: minecraft-${{ runner.os }}-${{ hashFiles('gradle.properties', 'plugin/build.gradle', 'buildSrc/src/**') }}
+      - name: Test generator process handling
+        run: ./gradlew -p buildSrc --no-daemon -Dorg.gradle.jvmargs=-Xmx512m test
+      - name: Build and check LimboAPI
+        run: ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx4g build
+      - name: Upload JARs
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: LimboAPI
-          path: "*/build/libs/*.jar"
-      - uses: dev-drprasad/delete-tag-and-release@v0.2.1
-        if: ${{ github.event_name == 'push' }}
+          name: LimboAPI-26.3-${{ github.sha }}
+          path: '*/build/libs/*.jar'
+          if-no-files-found: error
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
         with:
-          delete_release: true
-          tag_name: dev-build
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Find git version
-        id: git-version
-        run: echo "id=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-      - name: Find correct JAR
-        if: ${{ github.event_name == 'push' }}
-        id: find-jar
-        run: |
-          output="$(find plugin/build/libs/ ! -name "*-javadoc.jar" ! -name "*-sources.jar" -type f -printf "%f\n")"
-          echo "::set-output name=jarname::$output"
-      - name: Release the build
-        if: ${{ github.event_name == 'push' }}
-        uses: ncipollo/release-action@v1
-        with:
-          artifacts: plugin/build/libs/${{ steps.find-jar.outputs.jarname }}
-          body: ${{ join(github.event.commits.*.message, '\n') }}
-          prerelease: true
-          name: Dev-build ${{ steps.git-version.outputs.id }}
-          tag: dev-build
-      - name: Upload to Modrinth
-        if: ${{ github.event_name == 'push' }}
-        uses: RubixDev/modrinth-upload@v1.0.0
-        with:
-          token: ${{ secrets.MODRINTH_TOKEN }}
-          file_path: plugin/build/libs/${{ steps.find-jar.outputs.jarname }}
-          name: Dev-build ${{ steps.git-version.outputs.id }}
-          version: ${{ steps.git-version.outputs.id }}
-          changelog: ${{ join(github.event.commits.*.message, '\n') }}
-          game_versions: 1.7.2
-          release_type: beta
-          loaders: velocity
-          featured: false
-          project_id: TZOteSf2
+          name: reports-${{ github.sha }}
+          path: |
+            */build/reports/
+            buildSrc/build/reports/
+          if-no-files-found: ignore
