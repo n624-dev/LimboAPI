@@ -3,6 +3,7 @@ package jp.n624.limbo.validation;
 
 import java.net.InetSocketAddress;
 import io.netty.buffer.Unpooled;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.geysermc.mcprotocollib.network.Session;
@@ -14,6 +15,8 @@ import org.geysermc.mcprotocollib.network.packet.Packet;
 import org.geysermc.mcprotocollib.protocol.MinecraftConstants;
 import org.geysermc.mcprotocollib.protocol.MinecraftProtocol;
 import org.geysermc.mcprotocollib.protocol.codec.MinecraftTypes;
+import org.geysermc.mcprotocollib.protocol.packet.configuration.clientbound.ClientboundFinishConfigurationPacket;
+import org.geysermc.mcprotocollib.protocol.packet.configuration.clientbound.ClientboundRegistryDataPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundLoginPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundLevelChunkWithLightPacket;
@@ -42,9 +45,31 @@ public final class ProtocolProbe {
     AtomicBoolean finished = new AtomicBoolean();
     AtomicBoolean earlyDisconnect = new AtomicBoolean();
     AtomicBoolean policyDenied = new AtomicBoolean();
+    AtomicInteger trimMaterials = new AtomicInteger();
+    AtomicInteger trimPatterns = new AtomicInteger();
+    AtomicBoolean configurationChecked = new AtomicBoolean();
+    AtomicBoolean trimRegistriesValid = new AtomicBoolean();
     session.addListener(new SessionAdapter() {
       @Override public void packetReceived(Session current, Packet packet) {
-        if (packet instanceof ClientboundLoginPacket) {
+        if (packet instanceof ClientboundRegistryDataPacket registry && !configurationChecked.get()) {
+          if (registry.getRegistry().asString().equals("minecraft:trim_material")) {
+            trimMaterials.set(registry.getEntries().size());
+          } else if (registry.getRegistry().asString().equals("minecraft:trim_pattern")) {
+            for (var entry : registry.getEntries()) {
+              if (entry.getData() instanceof Map<?, ?> data
+                  && entry.getId().asString().equals(data.get("asset_id"))
+                  && data.containsKey("decal")
+                  && data.get("description") instanceof Map<?, ?> description
+                  && ("trim_pattern.minecraft." + entry.getId().value()).equals(description.get("translate"))) {
+                trimPatterns.incrementAndGet();
+              }
+            }
+          }
+        } else if (packet instanceof ClientboundFinishConfigurationPacket && !configurationChecked.getAndSet(true)) {
+          trimRegistriesValid.set(trimMaterials.get() > 0 && trimPatterns.get() == 18);
+          System.out.printf("PROBE_TRIM_REGISTRIES materials=%d patterns=%d valid=%s%n",
+              trimMaterials.get(), trimPatterns.get(), trimRegistriesValid.get());
+        } else if (packet instanceof ClientboundLoginPacket) {
           System.out.println("PROBE_LOGIN " + logins.incrementAndGet());
         } else if (packet instanceof ClientboundLevelChunkWithLightPacket chunk) {
           chunks.incrementAndGet();
@@ -96,12 +121,12 @@ public final class ProtocolProbe {
     boolean alive = session.isConnected();
     finished.set(true);
     session.disconnect("Protocol validation complete");
-    System.out.printf("PROBE_SUMMARY protocol=777 logins=%d chunks=%d teleports=%d errors=%d alive=%s highState=%s%n",
-        logins.get(), chunks.get(), teleports.get(), errors.get(), alive, highState.get());
+    System.out.printf("PROBE_SUMMARY protocol=777 logins=%d chunks=%d teleports=%d errors=%d alive=%s highState=%s trimRegistries=%s%n",
+        logins.get(), chunks.get(), teleports.get(), errors.get(), alive, highState.get(), trimRegistriesValid.get());
     boolean success = expectDenied
         ? earlyDisconnect.get() && policyDenied.get() && !alive && errors.get() == 0 && logins.get() == 0 && chunks.get() == 0
         : alive && !earlyDisconnect.get() && errors.get() == 0
-            && logins.get() >= 1 && chunks.get() > 0 && teleports.get() >= 1 && highState.get();
+            && logins.get() >= 1 && chunks.get() > 0 && teleports.get() >= 1 && highState.get() && trimRegistriesValid.get();
     System.exit(success ? 0 : 1);
   }
 }

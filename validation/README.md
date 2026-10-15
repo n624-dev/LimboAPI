@@ -28,7 +28,11 @@ java -Xmx256m -cp "build/probe:$GEYSER_JAR:$VELOCITY_JAR" \
 
 The probe requires protocol 777, decodes chunks and light data, reads chunk palettes,
 checks that state ID 35722 survives transmission, echoes teleport coordinates and
-rotation, and checks the connection stays alive. The duration is in seconds.
+rotation, and checks the connection stays alive. Before the first configuration
+finishes it also requires both trim registries, including 18 pattern entries with
+their matching asset IDs and descriptions. This detects the missing trim-pattern
+registry that caused Geyser's first-connection recipe initialization to fail in RC1.
+The duration is in seconds.
 Offline probes require an isolated offline-mode proxy; they do not validate Microsoft
 or Xbox authentication, rendering, or vanilla registry reference validation.
 
