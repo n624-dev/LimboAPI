@@ -1,58 +1,85 @@
-name: Java CI with Gradle
+name: Verify fork release
 
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published fork release tag to verify
+        required: true
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
     steps:
-      - name: Checkout
+      - name: Checkout release source
         uses: actions/checkout@v4.2.2
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - name: Set up JDK
         uses: actions/setup-java@v4.7.0
         with:
           distribution: temurin
           java-version: 25
+          cache: gradle
       - name: Cache generated data
         uses: actions/cache@v5.0.4
         with:
           path: |
             plugin/build/minecraft/
             plugin/build/generated/minecraft/mapping/
-          key: minecraft-${{ hashFiles('gradle.properties') }}
-      - name: Build LimboAPI
-        run: ./gradlew build
-      - name: Upload LimboAPI
+          key: minecraft-${{ runner.os }}-${{ hashFiles('gradle.properties', 'plugin/build.gradle', 'buildSrc/src/**') }}
+      - name: Test generator process handling
+        run: ./gradlew -p buildSrc --no-daemon -Dorg.gradle.jvmargs=-Xmx512m test
+      - name: Build and check release source
+        run: ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx4g build
+      - name: Verify published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern '*.jar' --pattern 'SHA256SUMS' --pattern 'artifacts.json' \
+            --dir downloaded-release
+          (cd downloaded-release && sha256sum --strict --check SHA256SUMS)
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          root = Path('downloaded-release')
+          manifest = json.loads((root / 'artifacts.json').read_text())
+          source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert manifest['source_commit'] == source, 'Release source differs from artifact manifest'
+          assert manifest['version'] == os.environ['RELEASE_TAG'], 'Release version differs from tag'
+          assert len(manifest['artifacts']) == 4, 'Expected plugin, API, sources and Javadoc'
+          for artifact in manifest['artifacts']:
+              data = (root / artifact['file']).read_bytes()
+              assert len(data) == artifact['bytes'], artifact['file']
+              assert hashlib.sha256(data).hexdigest() == artifact['sha256'], artifact['file']
+          print('Published artifact sizes, hashes, version and source revision match')
+          PY
+      - name: Upload rebuilt JARs for inspection
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: LimboAPI
-          path: "*/build/libs/*.jar"
-      - name: Find correct JAR
-        id: find-jar
-        run: |
-          output="$(find plugin/build/libs/ ! -name "*-javadoc.jar" ! -name "*-sources.jar" -type f -printf "%f\n")"
-          echo "::set-output name=jarname::$output"
-      - name: Upload to the GitHub release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: release-rebuild-${{ github.run_id }}
+          path: '*/build/libs/*.jar'
+          if-no-files-found: error
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
         with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: plugin/build/libs/${{ steps.find-jar.outputs.jarname }}
-          asset_name: ${{ steps.find-jar.outputs.jarname }}
-          asset_content_type: application/java-archive
-      - name: Upload to Modrinth
-        uses: RubixDev/modrinth-upload@v1.0.0
-        with:
-          token: ${{ secrets.MODRINTH_TOKEN }}
-          file_path: plugin/build/libs/${{ steps.find-jar.outputs.jarname }}
-          name: Release ${{ github.event.release.tag_name }}
-          version: ${{ github.event.release.tag_name }}
-          changelog: ${{ github.event.release.body }}
-          game_versions: 1.7.2
-          release_type: release
-          loaders: velocity
-          featured: true
-          project_id: TZOteSf2
+          name: release-reports-${{ github.run_id }}
+          path: |
+            */build/reports/
+            buildSrc/build/reports/
+          if-no-files-found: ignore

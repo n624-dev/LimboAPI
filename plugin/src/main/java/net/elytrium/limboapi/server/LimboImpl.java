@@ -1308,6 +1308,20 @@ public class LimboImpl implements Limbo {
           }
 
           if (version.noLessThan(ProtocolVersion.MINECRAFT_26_3)) {
+            // Geyser reads both trim registries when the first configuration finishes.
+            Map<String, CompoundBinaryTag> trimPatterns = new HashMap<>();
+            for (String patternName : List.of("bolt", "coast", "dune", "eye", "flow", "host", "raiser", "rib",
+                "sentry", "shaper", "silence", "snout", "spire", "tide", "vex", "ward", "wayfinder", "wild")) {
+              trimPatterns.put("minecraft:" + patternName, CompoundBinaryTag.builder()
+                  .putString("asset_id", "minecraft:" + patternName)
+                  .putBoolean("decal", false)
+                  .put("description", CompoundBinaryTag.builder()
+                      .putString("translate", "trim_pattern.minecraft." + patternName)
+                      .build())
+                  .build());
+            }
+            registryContainer.put("minecraft:trim_pattern", this.createRegistry("minecraft:trim_pattern", trimPatterns));
+
             Map<String, CompoundBinaryTag> pots = new HashMap<>();
             for (String potName : List.of("angler", "archer", "arms_up", "blade", "brewer", "burn", "danger",
                 "explorer", "flow", "friend", "guster", "heartbreak", "heart", "howl", "miner", "mourner",
