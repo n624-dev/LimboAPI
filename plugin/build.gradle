@@ -98,7 +98,7 @@ import com.google.common.io.Files
 import java.nio.file.Path
 import java.util.function.Function
 import java.util.stream.Collectors
-import net.elytrium.limboapi.build.GeneratorProcess
+import net.elytrium.limboapi.buildlogic.GeneratorProcess
 
 enum MinecraftVersion {
   MINECRAFT_1_7_2,
