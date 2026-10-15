@@ -1,5 +1,6 @@
 > **n624-dev fork for Minecraft 26.3.** Based on Elytrium's `bfef579`.
-> Release candidate `1.1.27-n624.1-rc.1`: automated VM checks passed; real Java/Bedrock client tests remain.
+> Release candidate `1.1.27-n624.1-rc.2` adds the trim-pattern registry missing on an initial Geyser join.
+> Automated VM checks passed; authenticated client and Controller validation is in progress.
 > This is not an official Elytrium release. See [build notes](docs/26.3.md) and [validation results](docs/validation-26.3.md).
 > Upstream documentation follows below.
 
