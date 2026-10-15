@@ -1,6 +1,7 @@
 > **n624-dev fork for Minecraft 26.3.** Based on Elytrium's `bfef579`.
-> Build and runtime validation are in progress; this is not an official Elytrium release.
-> See [the fork's build and validation notes](docs/26.3.md). Upstream documentation follows below.
+> Release candidate `1.1.27-n624.1-rc.1`: automated VM checks passed; real Java/Bedrock client tests remain.
+> This is not an official Elytrium release. See [build notes](docs/26.3.md) and [validation results](docs/validation-26.3.md).
+> Upstream documentation follows below.
 
 <img src="https://elytrium.net/src/img/elytrium.webp" alt="Elytrium" align="right">
 

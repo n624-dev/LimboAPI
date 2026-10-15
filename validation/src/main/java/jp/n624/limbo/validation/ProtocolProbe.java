@@ -25,6 +25,7 @@ public final class ProtocolProbe {
   public static void main(String[] args) throws Exception {
     String name = args.length > 0 ? args[0] : "Smoke263";
     int seconds = args.length > 1 ? Integer.parseInt(args[1]) : 25;
+    boolean expectDenied = args.length > 2 && args[2].equals("deny");
     MinecraftProtocol protocol = new MinecraftProtocol(name);
     if (protocol.getCodec().getProtocolVersion() != 777) {
       throw new IllegalStateException("Expected protocol 777, got " + protocol.getCodec().getProtocolVersion());
@@ -40,6 +41,7 @@ public final class ProtocolProbe {
     AtomicBoolean highState = new AtomicBoolean();
     AtomicBoolean finished = new AtomicBoolean();
     AtomicBoolean earlyDisconnect = new AtomicBoolean();
+    AtomicBoolean policyDenied = new AtomicBoolean();
     session.addListener(new SessionAdapter() {
       @Override public void packetReceived(Session current, Packet packet) {
         if (packet instanceof ClientboundLoginPacket) {
@@ -84,6 +86,8 @@ public final class ProtocolProbe {
         }
         if (!finished.get()) {
           earlyDisconnect.set(true);
+          policyDenied.set(event.getCause() == null
+              && event.getReason().toString().contains("現在このサーバーには参加できません"));
         }
       }
     });
@@ -94,8 +98,10 @@ public final class ProtocolProbe {
     session.disconnect("Protocol validation complete");
     System.out.printf("PROBE_SUMMARY protocol=777 logins=%d chunks=%d teleports=%d errors=%d alive=%s highState=%s%n",
         logins.get(), chunks.get(), teleports.get(), errors.get(), alive, highState.get());
-    boolean success = alive && !earlyDisconnect.get() && errors.get() == 0
-        && logins.get() >= 1 && chunks.get() > 0 && teleports.get() >= 1 && highState.get();
+    boolean success = expectDenied
+        ? earlyDisconnect.get() && policyDenied.get() && !alive && errors.get() == 0 && logins.get() == 0 && chunks.get() == 0
+        : alive && !earlyDisconnect.get() && errors.get() == 0
+            && logins.get() >= 1 && chunks.get() > 0 && teleports.get() >= 1 && highState.get();
     System.exit(success ? 0 : 1);
   }
 }
