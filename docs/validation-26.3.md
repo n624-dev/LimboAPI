@@ -23,15 +23,30 @@ Java: Temurin 25.0.4.1+1. Runtime versions are listed in [26.3.md](26.3.md).
 | Controller plugin compiled against the fork API and Velocity 4.2.0 | Passed; separate Maven validation profile and 9 existing tests passed |
 | Controller with a guest-local mock API | Whitelist synchronization and observations received |
 | Whitelisted offline Java identity | Rejected before play state; no join request reached the mock API |
-| Authenticated vanilla Java 26.3 login and round trip | Passed on RC1; RC2 real-client retest pending |
-| Actual Bedrock login through Floodgate | RC1 transfers and round trip observed, but initial Geyser recipe initialization throws; RC2 real-client retest pending |
-| Authenticated Controller waiting/ready/transfer flow | Pending real clients and validation identities |
+| Authenticated vanilla Java 26.3 login and round trip | Passed on RC1 and RC2, including initial login and command-triggered round trip |
+| Actual Bedrock login through Floodgate | RC2 authenticated login and round trip passed through linked Floodgate; no initial trim-registry exception |
+| Authenticated Controller waiting/ready/transfer flow | Java 26.3 and linked Floodgate Bedrock passed against the guest-local mock; pending → connected observations confirmed |
+| Controller command-triggered return | Java `/mcserver backend` returned Paper → Limbo → Paper; readiness changed after 15 seconds and transfer followed within the next poll |
+| Already-ready backend on authenticated login | Java reached Paper directly without entering the waiting Limbo |
+| Authenticated unlisted identities, unlinked Bedrock, API/backend outage paths | Not performed as real-client integration tests |
 | Production deployment, Cloudflare path and multi-hour load | Not performed |
 
 The protocol probes use an isolated offline-mode proxy and the complete protocol-777
 packet codec from Geyser. They do not replace vanilla registry reference validation,
 rendering, Microsoft authentication, Xbox authentication or Bedrock input testing.
 RakNet discovery alone is not a successful Bedrock login.
+
+The authenticated tests used an online-mode proxy. The Bedrock account was linked
+to the tested Java identity through Floodgate; the matching validation whitelist entry
+accepted both authenticated identity kinds. Controller responses came from a guest-local
+mock API, not the production scheduler or power controller. Waiting observations contained
+the connected client's identity before mock readiness changed, followed by a backend
+connection and a connected observation. An initial fixture watcher timed out before the
+human connected; changing the mock response then transferred the waiting client normally.
+
+One resource sample with the Java client connected measured Paper RSS at about 991 MiB
+and proxy RSS at about 811 MiB. Process-lifetime CPU averages were 3.0% and 3.4%; these
+are single-session samples, not peak usage or a load benchmark.
 
 ## Initial Geyser configuration fix
 
@@ -55,9 +70,11 @@ player positions. A real Java client could move after repeatedly pressing space.
 Strict position locking is not implemented by these handlers. Proxy command
 suggestions require `announce-proxy-commands = true`; that setting was corrected
 in the disposable validation VM, and the Java client confirmed `/limbo-test` suggestions.
+`/limbo-test` exists only in the minimal SmokePlugin profile. The separate Controller
+profile uses `/mcserver backend`; it does not install SmokePlugin's automatic transfer.
 
 The fork retains upstream's previous-gamemode workaround and its placeholder registry
-content. Their client-visible effects remain part of the real-client checks. Earlier
+content. Authenticated transfer checks do not verify every registry-dependent feature. Earlier
 Minecraft versions have not been covered by runtime regression tests in this session.
 
 Artifacts and their checksums are attached to the fork's prerelease. Build dependencies
@@ -65,4 +82,4 @@ still include upstream's Velocity 4.1.2-SNAPSHOT compile dependency; this is dis
 from the tested Velocity 4.2.0 runtime. Revalidate before changing either.
 
 The test VM and all Minecraft processes are stopped between sessions. Service units
-are not enabled at boot. Restore/start them explicitly for the remaining client tests.
+are not enabled at boot. Restore/start them explicitly for additional validation.
